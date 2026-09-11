@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Location History Lookup</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161923;
+    --border: #262b3a;
+    --text: #e6e8ee;
+    --muted: #8b90a0;
+    --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .seg {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .seg button {
+    background: var(--panel);
+    color: var(--muted);
+    border: none;
+    padding: 7px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .seg button.active {
+    background: var(--accent);
+    color: white;
+  }
+  #idInput {
+    flex: 1;
+    min-width: 260px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: monospace;
+  }
+  #idInput:focus { outline: 1px solid var(--accent); }
+  #searchBtn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #searchBtn:hover { opacity: 0.9; }
+  #searchBtn:disabled { opacity: 0.5; cursor: default; }
+  #status {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .layout {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    position: relative;
+  }
+  #mapLegend {
+    display: none;
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    z-index: 1000;
+    background: rgba(22,25,35,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  #mapLegend .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+  }
+  #mapLegend .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: none;
+  }
+  .dot.start { background: #4fff8c; }
+  .dot.latest { background: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.3); }
+  .dot.moving { background: #7ea6ff; }
+  .dot.stale { background: #ffb020; }
+  .leaflet-tooltip.ping-tooltip {
+    background: #1c2030;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    opacity: 1 !important;
+    max-width: 270px;
+  }
+  .leaflet-tooltip.ping-tooltip::before,
+  .leaflet-tooltip.ping-tooltip.leaflet-tooltip-top::before { border-top-color: #1c2030; }
+  .leaflet-tooltip.ping-tooltip.leaflet-tooltip-bottom::before { border-bottom-color: #1c2030; }
+  .leaflet-tooltip.ping-tooltip.leaflet-tooltip-left::before { border-left-color: #1c2030; }
+  .leaflet-tooltip.ping-tooltip.leaflet-tooltip-right::before { border-right-color: #1c2030; }
+  .ping-tt-head {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .ping-tt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 0;
+    font-size: 11px;
+  }
+  .ping-tt-row span { color: var(--muted); white-space: nowrap; }
+  .ping-tt-row b { font-weight: 500; text-align: right; }
+  .ping-tt-status {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .ping-tt-status.stale { color: #ffb020; }
+  .ping-tt-status.fresh { color: #4fff8c; }
+  #map {
+    flex: 1;
+    background: #1a1d27;
+  }
+  #sidebar {
+    width: 320px;
+    border-left: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--panel);
+  }
+  .card {
+    background: #1c2030;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .card h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 10px 0;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .row .label { color: var(--muted); white-space: nowrap; }
+  .row .value { font-weight: 500; text-align: right; word-break: break-all; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.dropoff { background: rgba(79,140,255,0.15); color: var(--accent); }
+  .badge.pickup { background: rgba(79,255,140,0.15); color: #4fff8c; }
+  .trip-chip {
+    display: inline-block;
+    font-family: monospace;
+    font-size: 11px;
+    background: #232840;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: 2px 4px 2px 0;
+  }
+  #error {
+    display: none;
+    background: rgba(255,80,80,0.1);
+    border: 1px solid rgba(255,80,80,0.3);
+    color: #ff8080;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  #empty {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+  #logPanel {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background: var(--bg);
+  }
+  #logPanel table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    white-space: nowrap;
+  }
+  #logPanel thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    color: var(--muted);
+    text-align: right;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    z-index: 1;
+  }
+  #logPanel thead th:first-child,
+  #logPanel tbody td:first-child { text-align: left; }
+  #logPanel tbody td {
+    text-align: right;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #logPanel tbody tr:nth-child(even) { background: #14171f; }
+  #logPanel tbody tr:hover { background: #1c2030; }
+  .delta-up { color: #4fff8c; }
+  .delta-down { color: #ff8080; }
+  .delta-flat { color: var(--muted); }
+  #logMeta {
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Location History Lookup</h1>
+  <div class="search-bar">
+    <div class="seg">
+      <button id="modeTrip" class="active">Trip ID</button>
+      <button id="modeDriver">Driver ID</button>
+    </div>
+    <input id="idInput" type="text" placeholder="Paste a trip ID…" autocomplete="off" spellcheck="false" />
+    <button id="searchBtn">Search</button>
+    <div class="seg">
+      <button id="viewMap" class="active">Map View</button>
+      <button id="viewLog">Full Log</button>
+    </div>
+    <span id="status"></span>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map"></div>
+  <div id="mapLegend">
+    <div class="legend-row"><span class="dot start"></span> Start</div>
+    <div class="legend-row"><span class="dot latest"></span> Latest</div>
+    <div class="legend-row"><span class="dot moving"></span> Moved (fresh)</div>
+    <div class="legend-row"><span class="dot stale"></span> Stale (unchanged) — hover any point for details</div>
+  </div>
+  <div id="sidebar">
+    <div id="error"></div>
+    <div id="empty">Paste a trip ID or driver ID above and click Search to load its location history.</div>
+
+    <div id="results" style="display:none;">
+      <div class="card">
+        <h2>Latest Position</h2>
+        <div class="row"><span class="label">Driver ID</span><span class="value" id="driverId">—</span></div>
+        <div class="row"><span class="label">Trip ID</span><span class="value" id="tripId">—</span></div>
+        <div class="row"><span class="label">Speed</span><span class="value" id="speed">—</span></div>
+        <div class="row"><span class="label">Heading</span><span class="value" id="heading">—</span></div>
+        <div class="row"><span class="label">Accuracy</span><span class="value" id="accuracy">—</span></div>
+        <div class="row"><span class="label">Recorded</span><span class="value" id="recordedAt">—</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Next Stop</h2>
+        <div class="row"><span class="label">Type</span><span class="value" id="nextStopType">—</span></div>
+        <div class="row"><span class="label">ETA</span><span class="value" id="nextStopEta">—</span></div>
+        <div class="row"><span class="label">Stop ID</span><span class="value" id="nextStopId" style="font-size:11px; font-family:monospace;">—</span></div>
+      </div>
+
+      <div class="card">
+        <h2>History Summary</h2>
+        <div class="row"><span class="label">Total pings</span><span class="value" id="pingCount">—</span></div>
+        <div class="row"><span class="label">First ping</span><span class="value" id="firstPing">—</span></div>
+        <div class="row"><span class="label">Last ping</span><span class="value" id="lastPing">—</span></div>
+        <div class="row"><span class="label">Tenant</span><span class="value" id="tenant" style="font-size:11px; font-family:monospace;">—</span></div>
+      </div>
+
+      <div class="card" id="tripsCard" style="display:none;">
+        <h2>Trips Covered</h2>
+        <div id="tripsList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="logPanel" style="display:none;">
+  <div id="logMeta"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Recorded At</th>
+        <th>Δt (s)</th>
+        <th>Lat</th>
+        <th>Lng</th>
+        <th>Distance (m)</th>
+        <th>Speed (km/h)</th>
+        <th>Δ Speed</th>
+        <th>Heading (°)</th>
+        <th>Accuracy (m)</th>
+        <th>Next Stop</th>
+        <th>Next Stop ETA</th>
+        <th>Trip ID</th>
+        <th>Driver ID</th>
+        <th>Received At</th>
+      </tr>
+    </thead>
+    <tbody id="logBody"></tbody>
+  </table>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  // ---- Configuration ----
+  const API_BASE = "https://tracking.supertruck.ai/api/v1/ts/pings";
+
+  // ---- State ----
+  let mode = "trip"; // "trip" | "driver"
+
+  // ---- Map setup ----
+  // preferCanvas keeps hundreds of per-ping markers smooth to hover/pan.
+  const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([36.05, -79.1], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  let routeLine = null;
+  let pointsLayer = null;
+  const STALE_EPSILON_M = 10; // positions within this distance count as "same spot"
+
+  // ---- Elements ----
+  const idInput = document.getElementById('idInput');
+  const searchBtn = document.getElementById('searchBtn');
+  const statusEl = document.getElementById('status');
+  const modeTripBtn = document.getElementById('modeTrip');
+  const modeDriverBtn = document.getElementById('modeDriver');
+  const emptyEl = document.getElementById('empty');
+  const resultsEl = document.getElementById('results');
+  const layoutEl = document.querySelector('.layout');
+  const logPanelEl = document.getElementById('logPanel');
+  const viewMapBtn = document.getElementById('viewMap');
+  const viewLogBtn = document.getElementById('viewLog');
+
+  function setView(next) {
+    viewMapBtn.classList.toggle('active', next === 'map');
+    viewLogBtn.classList.toggle('active', next === 'log');
+    layoutEl.style.display = next === 'map' ? 'flex' : 'none';
+    logPanelEl.style.display = next === 'log' ? 'block' : 'none';
+    if (next === 'map') setTimeout(() => map.invalidateSize(), 0);
+  }
+  viewMapBtn.addEventListener('click', () => setView('map'));
+  viewLogBtn.addEventListener('click', () => setView('log'));
+
+  function setMode(next) {
+    mode = next;
+    modeTripBtn.classList.toggle('active', mode === 'trip');
+    modeDriverBtn.classList.toggle('active', mode === 'driver');
+    idInput.placeholder = mode === 'trip' ? 'Paste a trip ID…' : 'Paste a driver ID…';
+  }
+  modeTripBtn.addEventListener('click', () => setMode('trip'));
+  modeDriverBtn.addEventListener('click', () => setMode('driver'));
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { hour12: false });
+    } catch { return iso; }
+  }
+
+  // Haversine distance in metres between two lat/lng points.
+  function distanceMetres(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = (d) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Augments each ping (already sorted oldest -> newest) with the change
+  // since the previous ping: elapsed time, distance moved, speed delta.
+  function computeDeltas(pings) {
+    return pings.map((p, i) => {
+      if (i === 0) {
+        return { ...p, dtSec: null, distanceM: null, speedDelta: null };
+      }
+      const prev = pings[i - 1];
+      const dtSec = (new Date(p.recordedAt) - new Date(prev.recordedAt)) / 1000;
+      const distanceM = distanceMetres(prev.lat, prev.lng, p.lat, p.lng);
+      const speedDelta = (p.speedKmh != null && prev.speedKmh != null)
+        ? p.speedKmh - prev.speedKmh
+        : null;
+      return { ...p, dtSec, distanceM, speedDelta };
+    });
+  }
+
+  function deltaClass(v) {
+    if (v == null || Math.abs(v) < 0.05) return 'delta-flat';
+    return v > 0 ? 'delta-up' : 'delta-down';
+  }
+
+  function fmtDelta(v, digits = 1, suffix = '') {
+    if (v == null) return '—';
+    const sign = v > 0 ? '+' : '';
+    return `${sign}${v.toFixed(digits)}${suffix}`;
+  }
+
+  // Renders the full ping-by-ping log table, one row per ping, oldest first,
+  // so you can read straight down the table and see exactly how lat/lng,
+  // speed, heading, and next-stop data changed ping to ping.
+  function renderLogTable(rows, currentMode) {
+    const meta = document.getElementById('logMeta');
+    meta.textContent = `${rows.length} pings — oldest to newest`;
+
+    const body = document.getElementById('logBody');
+    body.innerHTML = rows.map((p, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${fmtTime(p.recordedAt)}</td>
+        <td>${p.dtSec != null ? p.dtSec.toFixed(0) : '—'}</td>
+        <td>${p.lat.toFixed(6)}</td>
+        <td>${p.lng.toFixed(6)}</td>
+        <td>${p.distanceM != null ? p.distanceM.toFixed(1) : '—'}</td>
+        <td>${p.speedKmh != null ? p.speedKmh.toFixed(1) : '—'}</td>
+        <td class="${deltaClass(p.speedDelta)}">${fmtDelta(p.speedDelta)}</td>
+        <td>${p.heading != null ? p.heading.toFixed(0) : '—'}</td>
+        <td>${p.accuracyMetres != null ? p.accuracyMetres.toFixed(1) : '—'}</td>
+        <td style="text-align:left;">${p.nextStopType || '—'}</td>
+        <td>${fmtTime(p.nextStopEta)}</td>
+        <td style="text-align:left;">${currentMode === 'driver' ? (p.tripId || '—') : '—'}</td>
+        <td style="text-align:left;">${currentMode === 'trip' ? (p.driverId || '—') : '—'}</td>
+        <td>${fmtTime(p.receivedAt)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function fmtDuration(sec) {
+    if (sec == null || sec <= 0) return null;
+    const total = Math.round(sec);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  // Tags each ping with how long it's been sitting at essentially the same
+  // spot: walks the rows (already carrying distanceM from computeDeltas) and
+  // tracks the start of the current "unchanged" run. A ping that moved more
+  // than STALE_EPSILON_M resets the run and is "fresh"; a ping that didn't
+  // move gets staleForSec = time since the run started.
+  function addStaleInfo(rows) {
+    let streakStart = rows[0];
+    return rows.map((r, i) => {
+      if (i === 0) {
+        streakStart = r;
+        return { ...r, staleForSec: 0, isStale: false };
+      }
+      const moved = r.distanceM == null || r.distanceM > STALE_EPSILON_M;
+      if (moved) {
+        streakStart = r;
+        return { ...r, staleForSec: 0, isStale: false };
+      }
+      const staleForSec = (new Date(r.recordedAt) - new Date(streakStart.recordedAt)) / 1000;
+      return { ...r, staleForSec, isStale: true };
+    });
+  }
+
+  // Full-detail hover tooltip for a single ping marker on the map.
+  function pingTooltipHTML(p, idx, total, currentMode) {
+    const otherIdLabel = currentMode === 'driver' ? 'Trip ID' : 'Driver ID';
+    const otherIdValue = currentMode === 'driver' ? p.tripId : p.driverId;
+    const staleText = p.isStale
+      ? `Stale for ${fmtDuration(p.staleForSec)} — position unchanged`
+      : (idx === 0 ? 'First recorded ping' : 'Moved — fresh position');
+
+    return `
+      <div class="ping-tt-head">#${idx + 1} of ${total} — ${fmtTime(p.recordedAt)}</div>
+      <div class="ping-tt-row"><span>Lat, Lng</span><b>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</b></div>
+      <div class="ping-tt-row"><span>Speed</span><b>${p.speedKmh != null ? p.speedKmh.toFixed(1) + ' km/h' : '—'}</b></div>
+      <div class="ping-tt-row"><span>Δ Speed</span><b class="${deltaClass(p.speedDelta)}">${fmtDelta(p.speedDelta)}</b></div>
+      <div class="ping-tt-row"><span>Heading</span><b>${p.heading != null ? p.heading.toFixed(0) + '°' : '—'}</b></div>
+      <div class="ping-tt-row"><span>Accuracy</span><b>${p.accuracyMetres != null ? p.accuracyMetres.toFixed(1) + ' m' : '—'}</b></div>
+      <div class="ping-tt-row"><span>Since prev ping</span><b>${p.dtSec != null ? p.dtSec.toFixed(0) + 's, ' + p.distanceM.toFixed(1) + ' m' : '—'}</b></div>
+      <div class="ping-tt-row"><span>Next stop</span><b>${p.nextStopType || '—'}${p.nextStopEta ? ' · ' + fmtTime(p.nextStopEta) : ''}</b></div>
+      <div class="ping-tt-row"><span>${otherIdLabel}</span><b style="font-family:monospace; font-size:10px;">${otherIdValue || '—'}</b></div>
+      <div class="ping-tt-row"><span>Received</span><b>${fmtTime(p.receivedAt)}</b></div>
+      <div class="ping-tt-status ${p.isStale ? 'stale' : 'fresh'}">${staleText}</div>
+    `;
+  }
+
+  // Draws one small marker per ping with a hover tooltip carrying every
+  // field, so the whole route can be inspected point-by-point on the map.
+  function renderPointMarkers(rows, currentMode) {
+    if (pointsLayer) map.removeLayer(pointsLayer);
+    pointsLayer = L.layerGroup();
+
+    rows.forEach((p, i) => {
+      const isStart = i === 0;
+      const isLatest = i === rows.length - 1;
+      const color = isStart ? '#4fff8c' : isLatest ? '#4f8cff' : (p.isStale ? '#ffb020' : '#7ea6ff');
+      const radius = (isStart || isLatest) ? 7 : (p.isStale ? 4 : 5);
+
+      const marker = L.circleMarker([p.lat, p.lng], {
+        radius,
+        color,
+        weight: (isStart || isLatest) ? 2 : 1,
+        fillColor: color,
+        fillOpacity: p.isStale ? 0.55 : 0.9,
+      });
+
+      marker.bindTooltip(pingTooltipHTML(p, i, rows.length, currentMode), {
+        direction: 'top',
+        sticky: true,
+        className: 'ping-tooltip',
+        opacity: 1,
+      });
+
+      marker.addTo(pointsLayer);
+    });
+
+    pointsLayer.addTo(map);
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function clearError() {
+    document.getElementById('error').style.display = 'none';
+  }
+
+  function updateURL(id) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('type', mode);
+    url.searchParams.set('id', id);
+    window.history.replaceState({}, '', url);
+  }
+
+  async function search() {
+    const id = idInput.value.trim();
+    if (!id) {
+      showError('Enter a trip ID or driver ID first.');
+      return;
+    }
+
+    updateURL(id);
+
+    const endpoint = mode === 'trip'
+      ? `${API_BASE}/trip/${encodeURIComponent(id)}`
+      : `${API_BASE}/driver/${encodeURIComponent(id)}`;
+
+    searchBtn.disabled = true;
+    statusEl.textContent = 'Loading…';
+    clearError();
+
+    try {
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const pings = json.data || [];
+      if (!pings.length) throw new Error('No ping data found for this ID');
+
+      // Sort oldest -> newest by recordedAt
+      pings.sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      const first = pings[0];
+      const latest = pings[pings.length - 1];
+      const rowsWithDeltas = addStaleInfo(computeDeltas(pings));
+      renderLogTable(rowsWithDeltas, mode);
+
+      emptyEl.style.display = 'none';
+      resultsEl.style.display = 'block';
+      document.getElementById('mapLegend').style.display = 'block';
+
+      // ---- Draw route ----
+      const latlngs = pings.map(p => [p.lat, p.lng]);
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = L.polyline(latlngs, { color: '#4f8cff', weight: 3, opacity: 0.6 }).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+
+      // ---- One hoverable marker per ping, colored by fresh/stale/endpoint ----
+      renderPointMarkers(rowsWithDeltas, mode);
+
+      // ---- Sidebar: latest position ----
+      document.getElementById('driverId').textContent = latest.driverId || '—';
+      document.getElementById('tripId').textContent = latest.tripId || '—';
+      document.getElementById('speed').textContent = latest.speedKmh != null ? `${latest.speedKmh.toFixed(1)} km/h` : '—';
+      document.getElementById('heading').textContent = latest.heading != null ? `${latest.heading.toFixed(0)}°` : '—';
+      document.getElementById('accuracy').textContent = latest.accuracyMetres != null ? `${latest.accuracyMetres.toFixed(1)} m` : '—';
+      document.getElementById('recordedAt').textContent = fmtTime(latest.recordedAt);
+
+      const typeLabel = latest.nextStopType || '—';
+      const stopEl = document.getElementById('nextStopType');
+      stopEl.innerHTML = typeLabel !== '—'
+        ? `<span class="badge ${typeLabel.toLowerCase()}">${typeLabel}</span>`
+        : '—';
+      document.getElementById('nextStopEta').textContent = fmtTime(latest.nextStopEta);
+      document.getElementById('nextStopId').textContent = latest.nextStopId || '—';
+
+      // ---- Sidebar: history summary ----
+      document.getElementById('pingCount').textContent = json.count ?? pings.length;
+      document.getElementById('firstPing').textContent = fmtTime(first.recordedAt);
+      document.getElementById('lastPing').textContent = fmtTime(latest.recordedAt);
+      document.getElementById('tenant').textContent = latest.tenantId || '—';
+
+      // ---- Sidebar: trips covered (only meaningful for driver search) ----
+      const tripsCard = document.getElementById('tripsCard');
+      const tripsList = document.getElementById('tripsList');
+      if (mode === 'driver') {
+        const uniqueTrips = [...new Set(pings.map(p => p.tripId).filter(Boolean))];
+        tripsList.innerHTML = uniqueTrips.map(t => `<span class="trip-chip">${t}</span>`).join('');
+        tripsCard.style.display = uniqueTrips.length ? 'block' : 'none';
+      } else {
+        tripsCard.style.display = 'none';
+      }
+
+      statusEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+      statusEl.textContent = 'Error';
+      showError(`Failed to load history: ${err.message}. Note: this API may require authentication or may not be reachable from a browser due to CORS — if so, this fetch will fail even though the endpoint itself works.`);
+    } finally {
+      searchBtn.disabled = false;
+    }
+  }
+
+  searchBtn.addEventListener('click', search);
+  idInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') search();
+  });
+
+  // ---- Load from URL params on page load, if present ----
+  const params = new URLSearchParams(window.location.search);
+  const initialType = params.get('type');
+  const initialId = params.get('id');
+  if (initialType === 'driver' || initialType === 'trip') setMode(initialType);
+  if (initialId) {
+    idInput.value = initialId;
+    search();
+  }
+</script>
+
+</body>
+</html>
